@@ -10,6 +10,16 @@
 
 # deps
 node_modules/
+.pnpm-home/
+
+# build
+dist/
+
+# nix
+.nix-cache/
+result
+result-*
+.tmp-*
 
 # env
 .env

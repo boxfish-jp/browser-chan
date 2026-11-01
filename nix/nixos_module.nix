@@ -9,6 +9,11 @@ self:
 let
   cfg = config.services.browser-chan;
   pkg = cfg.package;
+  loopbackHosts = [
+    "127.0.0.1"
+    "::1"
+    "localhost"
+  ];
 in
 
 {
@@ -40,6 +45,18 @@ in
       description = "Directory to store the browser profile data";
     };
 
+    mcpTokenFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Absolute path to a file containing the MCP bearer token";
+    };
+
+    mcpAllowedHosts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Additional Host and Origin hostnames allowed for /mcp";
+    };
+
     openFirewall = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -48,6 +65,18 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = lib.elem cfg.host loopbackHosts || cfg.mcpTokenFile != null;
+        message = "services.browser-chan: set mcpTokenFile when host is not loopback";
+      }
+      {
+        assertion =
+          cfg.mcpTokenFile == null || lib.hasPrefix "/" cfg.mcpTokenFile;
+        message = "services.browser-chan: mcpTokenFile must be an absolute path";
+      }
+    ];
+
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
 
     environment.systemPackages = [ pkg ];
@@ -62,11 +91,23 @@ in
         Restart = "on-failure";
         DynamicUser = true;
         StateDirectory = "browser-chan";
-        Environment = [
-          "BROWSER_CHAN_HOST=${cfg.host}"
-          "BROWSER_CHAN_PORT=${toString cfg.port}"
-          "BROWSER_CHAN_PROFILE_DIR=${cfg.profileDir}"
-        ];
+        StateDirectoryMode = "0700";
+        TimeoutStopSec = 30;
+        LoadCredential = lib.optional (
+          cfg.mcpTokenFile != null
+        ) "mcp-token:${cfg.mcpTokenFile}";
+        Environment =
+          [
+            "BROWSER_CHAN_HOST=${cfg.host}"
+            "BROWSER_CHAN_PORT=${toString cfg.port}"
+            "BROWSER_CHAN_PROFILE_DIR=${cfg.profileDir}"
+          ]
+          ++ lib.optional (
+            cfg.mcpTokenFile != null
+          ) "BROWSER_CHAN_MCP_TOKEN_FILE=%d/mcp-token"
+          ++ lib.optional (
+            cfg.mcpAllowedHosts != [ ]
+          ) "BROWSER_CHAN_MCP_ALLOWED_HOSTS=${lib.concatStringsSep "," cfg.mcpAllowedHosts}";
       };
     };
   };

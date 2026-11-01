@@ -25,7 +25,7 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
       pname
       ;
     fetcherVersion = 4;
-    hash = "sha256-SfiihhmAnsZxjDVckuEJ08lBCpclkQh8i5MHB+hYKh4=";
+    hash = "sha256-DMZG62rkQVdkyo6CnGUxqGOAO2D3qLW1gEoOUJ/nEb8=";
   };
 
   buildPhase = ''
@@ -44,8 +44,9 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     NODE_BIN="${node}/bin/node"
 
     cat > $out/bin/$pname <<EOF
-    #!/usr/bin/env bash
+    #!${pkgs.bash}/bin/bash
     set -euo pipefail
+    export PATH="${pkgs.gnutar}/bin:${pkgs.gzip}/bin:${pkgs.coreutils}/bin:\$PATH"
     export PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH="${pkgs.playwright-driver.browsers}/chromium-${chromium-rev}/chrome-linux64/chrome";
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
@@ -54,11 +55,22 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     exec "$NODE_BIN" "${placeholder "out"}/lib/${pname}/dist/index.js" "\$@"
     EOF
     chmod +x $out/bin/$pname
+
+    for subcommand in profile-edit profile-export profile-import; do
+      cat > $out/bin/browser-chan-$subcommand <<EOF
+    #!${pkgs.bash}/bin/bash
+    set -euo pipefail
+    exec "${placeholder "out"}/bin/$pname" $subcommand "\$@"
+    EOF
+      chmod +x $out/bin/browser-chan-$subcommand
+    done
+
     runHook postInstall
   '';
 
   meta = {
     description = "ヘッドレスブラウザちゃん";
     license = pkgs.lib.licenses.mit;
+    mainProgram = "browser-chan";
   };
 })
