@@ -19,7 +19,7 @@
       perSystem = flake-utils.lib.eachDefaultSystem (
         system:
         let
-          pname = "browser-tyan";
+          pname = "browser-chan";
           pkgs = import nixpkgs { inherit system; };
           pnpm = pkgs.pnpm_11;
           node = pkgs.nodejs_24;

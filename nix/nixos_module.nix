@@ -7,19 +7,19 @@ self:
 }:
 
 let
-  cfg = config.services.browser-tyan;
+  cfg = config.services.browser-chan;
   pkg = cfg.package;
 in
 
 {
-  options.services.browser-tyan = {
-    enable = lib.mkEnableOption "browser-tyan headless browser service";
+  options.services.browser-chan = {
+    enable = lib.mkEnableOption "browser-chan headless browser service";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = self.packages.${pkgs.system}.default;
       defaultText = lib.literalExpression "self.packages.\${pkgs.system}.default";
-      description = "browser-tyan package to use";
+      description = "browser-chan package to use";
     };
 
     port = lib.mkOption {
@@ -36,7 +36,7 @@ in
 
     profileDir = lib.mkOption {
       type = lib.types.str;
-      default = "/var/lib/browser-tyan/profile";
+      default = "/var/lib/browser-chan/profile";
       description = "Directory to store the browser profile data";
     };
 
@@ -52,20 +52,20 @@ in
 
     environment.systemPackages = [ pkg ];
 
-    systemd.services.browser-tyan = {
-      description = "browser-tyan headless browser service";
+    systemd.services.browser-chan = {
+      description = "browser-chan headless browser service";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
 
       serviceConfig = {
-        ExecStart = "${pkg}/bin/browser-tyan";
+        ExecStart = "${pkg}/bin/browser-chan";
         Restart = "on-failure";
         DynamicUser = true;
-        StateDirectory = "browser-tyan";
+        StateDirectory = "browser-chan";
         Environment = [
-          "BROWSER_TYAN_HOST=${cfg.host}"
-          "BROWSER_TYAN_PORT=${toString cfg.port}"
-          "BROWSER_TYAN_PROFILE_DIR=${cfg.profileDir}"
+          "BROWSER_CHAN_HOST=${cfg.host}"
+          "BROWSER_CHAN_PORT=${toString cfg.port}"
+          "BROWSER_CHAN_PROFILE_DIR=${cfg.profileDir}"
         ];
       };
     };

@@ -1,5 +1,5 @@
 {
-  "name": "browser_tyan",
+  "name": "browser-chan",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",

@@ -9,8 +9,8 @@ COPY tsconfig.json ./
 COPY src/ src/
 RUN pnpm run build
 
-ENV BROWSER_TYAN_HOST=0.0.0.0
-ENV BROWSER_TYAN_PORT=3000
-ENV BROWSER_TYAN_PROFILE_DIR=/app/browser-profile
+ENV BROWSER_CHAN_HOST=0.0.0.0
+ENV BROWSER_CHAN_PORT=3000
+ENV BROWSER_CHAN_PROFILE_DIR=/app/browser-profile
 
 CMD ["node", "dist/index.js"]

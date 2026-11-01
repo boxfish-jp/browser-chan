@@ -6,11 +6,11 @@ import { chromium } from "playwright-core";
 
 const app = new Hono();
 
-const PORT = parseInt(process.env.BROWSER_TYAN_PORT ?? "3000", 10);
-const HOST = process.env.BROWSER_TYAN_HOST ?? "0.0.0.0";
+const PORT = parseInt(process.env.BROWSER_CHAN_PORT ?? "3000", 10);
+const HOST = process.env.BROWSER_CHAN_HOST ?? "0.0.0.0";
 const PROFILE_DIR =
-  process.env.BROWSER_TYAN_PROFILE_DIR ??
-  join(homedir(), ".local/share/broweser-tyan/");
+  process.env.BROWSER_CHAN_PROFILE_DIR ??
+  join(homedir(), ".local/share/browser-chan/");
 
 app.get("/", async (c) => {
   let context: Awaited<
