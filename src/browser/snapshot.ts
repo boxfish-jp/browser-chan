@@ -70,6 +70,9 @@ export const capturePageSnapshot = async (
   page: Page,
 ): Promise<PageSnapshot> => {
   const captured = await page.evaluate((maxElements) => {
+    (globalThis as { __name?: (target: unknown) => unknown }).__name ??= (
+      target: unknown,
+    ) => target;
     const SELECTOR =
       'a[href], button, input, select, textarea, summary, [role], [tabindex], [contenteditable="true"]';
     const INTERACTIVE_TAGS = new Set([

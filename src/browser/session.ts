@@ -47,7 +47,6 @@ const stringifyEvaluateResult = (value: unknown): string => {
 
 export class BrowserSession {
   private readonly _profileDir: string;
-  private _context: BrowserContext | null = null;
   private _activePage: Page | null = null;
   private _queue: Promise<unknown> = Promise.resolve();
 
@@ -56,11 +55,7 @@ export class BrowserSession {
   }
 
   get browserOpen(): boolean {
-    return this._context !== null;
-  }
-
-  get profileDir(): string {
-    return this._profileDir;
+    return this._activePage !== null;
   }
 
   private _enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -86,45 +81,47 @@ export class BrowserSession {
   }
 
   private async _closeContext(): Promise<void> {
-    const context = this._context;
-    this._context = null;
+    const context = this._activePage?.context() ?? null;
     this._activePage = null;
     if (context) {
       await context.close().catch(() => undefined);
     }
   }
 
-  private async _openContext(headless: boolean): Promise<BrowserContext> {
+  private async _openContext(): Promise<BrowserContext> {
     await this._closeContext();
     const context = await chromium.launchPersistentContext(this._profileDir, {
-      headless,
+      headless: true,
       args: BROWSER_ARGS,
       acceptDownloads: true,
       viewport: VIEWPORT,
-      ...(headless ? {} : { slowMo: 300 }),
     });
-    this._context = context;
     context.on("close", () => {
-      if (this._context === context) {
-        this._context = null;
+      if (this._activePage?.context() === context) {
         this._activePage = null;
       }
     });
-    this._activePage = this._pickPage(context) ?? (await context.newPage());
+    try {
+      this._activePage = this._pickPage(context) ?? (await context.newPage());
+    } catch (error) {
+      await context.close().catch(() => undefined);
+      throw error;
+    }
     return context;
   }
 
   private async _ensurePage(): Promise<Page> {
-    if (!this._context) {
-      await this._openContext(true);
+    if (!this._activePage) {
+      await this._openContext();
     }
-    const context = this._context;
-    if (!context) {
+    const activePage = this._activePage;
+    if (!activePage) {
       throw new Error("Browser context is not available");
     }
-    if (this._activePage && !this._activePage.isClosed()) {
-      return this._activePage;
+    if (!activePage.isClosed()) {
+      return activePage;
     }
+    const context = activePage.context();
     this._activePage = this._pickPage(context) ?? (await context.newPage());
     return this._activePage;
   }
@@ -243,16 +240,13 @@ export class BrowserSession {
 
   tabs(action: TabAction, index?: number, url?: string): Promise<TabInfo[]> {
     return this._enqueue(async () => {
+      const newUrl = action === "new" && url ? parseHttpUrl(url) : null;
       const page = await this._ensurePage();
-      let context = this._context;
-      if (!context) {
-        throw new Error("Browser context is not available");
-      }
+      let context = page.context();
       if (action === "new") {
-        const target = url ? parseHttpUrl(url) : null;
         const newPage = await context.newPage();
-        if (target) {
-          await newPage.goto(target, {
+        if (newUrl) {
+          await newPage.goto(newUrl, {
             waitUntil: "domcontentloaded",
             timeout: NAVIGATION_TIMEOUT_MS,
           });
@@ -271,12 +265,10 @@ export class BrowserSession {
           if (remaining.length === 0) {
             this._activePage = await context.newPage();
           } else if (this._activePage === target || !this._activePage) {
-            this._activePage = remaining.at(-1) ?? null;
+            this._activePage = remaining.at(-1) ?? (await context.newPage());
           }
         } catch {
-          context = await this._openContext(true);
-          this._activePage =
-            this._pickPage(context) ?? (await context.newPage());
+          context = await this._openContext();
         }
       } else if (action !== "list") {
         throw new Error(`Unknown tabs action: ${action}`);
@@ -305,12 +297,8 @@ export class BrowserSession {
 
   withScratchPage<T>(task: (page: Page) => Promise<T>): Promise<T> {
     return this._enqueue(async () => {
-      await this._ensurePage();
-      const context = this._context;
-      if (!context) {
-        throw new Error("Browser context is not available");
-      }
-      const previous = this._activePage;
+      const activePage = await this._ensurePage();
+      const context = activePage.context();
       const page = await context.newPage();
       try {
         return await task(page);
@@ -318,40 +306,15 @@ export class BrowserSession {
         if (!page.isClosed()) {
           await page.close().catch(() => undefined);
         }
-        if (this._context !== context) {
+        if (this._activePage?.context() !== context) {
           this._activePage = null;
-        } else if (previous && !previous.isClosed()) {
-          this._activePage = previous;
+        } else if (!activePage.isClosed()) {
+          this._activePage = activePage;
         } else {
-          this._activePage = this._pickPage(context);
+          this._activePage =
+            this._pickPage(context) ?? (await context.newPage());
         }
       }
-    });
-  }
-
-  withSuspended<T>(task: () => Promise<T>): Promise<T> {
-    return this._enqueue(async () => {
-      await this._closeContext();
-      return task();
-    });
-  }
-
-  openHeaded(startUrl: string): Promise<void> {
-    return this._enqueue(async () => {
-      const target = parseHttpUrl(startUrl);
-      const context = await this._openContext(false);
-      const page = await context.newPage();
-      this._activePage = page;
-      await page.goto(target, {
-        waitUntil: "domcontentloaded",
-        timeout: NAVIGATION_TIMEOUT_MS,
-      });
-      await new Promise<void>((resolve) => {
-        context.once("close", () => resolve());
-        if (this._context === null) {
-          resolve();
-        }
-      });
     });
   }
 }

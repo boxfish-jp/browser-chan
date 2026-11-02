@@ -1,11 +1,15 @@
 import { serve } from "@hono/node-server";
 import { BrowserSession } from "../browser/session.js";
+import type { ServerConfig } from "../config.js";
 import { loadServerConfig } from "../config.js";
 import { createBrowserChanApp } from "../http/app.js";
 import { VERSION } from "../version.js";
 
+const hostForDisplay = (host: string): string =>
+  host.includes(":") ? `[${host}]` : host;
+
 export const runServerCommand = async (): Promise<number> => {
-  let config: ReturnType<typeof loadServerConfig>;
+  let config: ServerConfig;
   try {
     config = loadServerConfig();
   } catch (error) {
@@ -17,16 +21,8 @@ export const runServerCommand = async (): Promise<number> => {
   });
   const browserApp = createBrowserChanApp({
     session,
-    token: config.token,
-    host: config.host,
-    allowedMcpHosts: config.allowedMcpHosts,
     version: VERSION,
-    maxProfileBytes: config.maxProfileBytes,
-    maxExtractedProfileBytes: config.maxExtractedProfileBytes,
   });
-  const displayHost = config.host.includes(":")
-    ? `[${config.host}]`
-    : config.host;
   const server = serve(
     {
       fetch: browserApp.app.fetch,
@@ -35,14 +31,16 @@ export const runServerCommand = async (): Promise<number> => {
     },
     (info) => {
       console.log(`browser-chan ${VERSION}`);
-      console.log(`Listening on http://${displayHost}:${info.port}`);
-      console.log(`MCP endpoint: http://${displayHost}:${info.port}/mcp`);
+      if (info.address === "0.0.0.0" || info.address === "::") {
+        const anyAddress = hostForDisplay(info.address);
+        console.log(`Listening on ${anyAddress}:${info.port} (all interfaces)`);
+        console.log(`MCP endpoint: http://<machine address>:${info.port}/mcp`);
+      } else {
+        const origin = `http://${hostForDisplay(config.host)}:${info.port}`;
+        console.log(`Listening on ${origin}`);
+        console.log(`MCP endpoint: ${origin}/mcp`);
+      }
       console.log(`Profile directory: ${config.profileDir}`);
-      console.log(
-        config.token
-          ? "Authentication: bearer token required for /mcp, /profile/* and /hand"
-          : "Authentication: disabled (loopback only)",
-      );
     },
   );
   server.on("error", (error) => {

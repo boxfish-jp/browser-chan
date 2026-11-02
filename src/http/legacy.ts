@@ -52,23 +52,4 @@ export const registerLegacyRoutes = (
       return c.text(FAILED_MESSAGE);
     }
   });
-
-  app.get("/hand", async (c) => {
-    console.log("🚀 GUI ブラウザを起動します。手動でログインしてください。");
-    console.log(
-      "   完了後、ブラウザウィンドウを閉じるとスクリプトが終了します。",
-    );
-    try {
-      await options.session.openHeaded("https://google.com");
-      console.log("✅ ログイン状態をプロファイルに保存しました。");
-      console.log(`📁 保存先: ${options.session.profileDir}`);
-      return c.text("ok");
-    } catch (error) {
-      console.error(
-        "GUI ブラウザの起動に失敗しました。",
-        error instanceof Error ? error.message : String(error),
-      );
-      return c.text("Failed to open the browser", 500);
-    }
-  });
 };

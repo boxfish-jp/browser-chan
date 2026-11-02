@@ -4,14 +4,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "${BROWSER_CHAN_PORT:-3000}:${BROWSER_CHAN_PORT:-3000}"
+    network_mode: host
     volumes:
       - ./browser-profile:/app/browser-profile
     environment:
-      - BROWSER_CHAN_HOST=${BROWSER_CHAN_HOST:-0.0.0.0}
+      - BROWSER_CHAN_HOST=127.0.0.1
       - BROWSER_CHAN_PORT=${BROWSER_CHAN_PORT:-3000}
       - BROWSER_CHAN_PROFILE_DIR=${BROWSER_CHAN_PROFILE_DIR:-/app/browser-profile}
-      - BROWSER_CHAN_MCP_TOKEN=${BROWSER_CHAN_MCP_TOKEN:?BROWSER_CHAN_MCP_TOKEN is required}
-      - BROWSER_CHAN_MCP_ALLOWED_HOSTS=${BROWSER_CHAN_MCP_ALLOWED_HOSTS:-}
     shm_size: '1gb'

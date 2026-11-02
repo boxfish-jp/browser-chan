@@ -1,31 +1,30 @@
 # browser-chan
 
-永続 Chromium プロファイルを 1 プロセスで共有し、MCP（Streamable HTTP）と既存の HTTP API から操作するブラウザサーバです。ニコニコ生放送の `GET /` は従来どおり残し、プロファイルの作成・export・import をローカルとサーバの両方で行えます。
+永続 Chromium プロファイルを 1 プロセスで共有し、MCP（Streamable HTTP）と既存の HTTP API から操作するブラウザサーバです。ニコニコ生放送の `GET /` も提供し、プロファイルの作成・export・import は CLI で行います。
 
 ## 動作環境
 
 - Nix（flakes を有効にした状態）。
 - `x86_64-linux` / `aarch64-linux`。`x86_64-linux` のみ動作確認済みです。
+- Home Manager（Linux の systemd user service で常駐させる場合）。
 - Chromium はこの flake が `playwright-driver` から用意します。利用者が別途インストールする必要はありません。
-- `profile-edit` は X11 または Wayland のデスクトップが必要です。
+- `edit` は X11 または Wayland のデスクトップが必要です。
 - MCP クライアントはこのリポジトリに含みません。DSH を使う場合は `@deepseek-ai/dsh-mcp-client` を利用者側の設定に追加します。
 - 動作確認済み: Node.js `24.18.0`、pnpm `11.13.1`、Playwright `1.61.1`、DSH `0.2.1-rc.3`。
 
 ## 最小の使い方
 
-トークンをファイルに保存し、サーバを起動します。`127.0.0.1` 以外で待ち受ける場合はトークンが必須です。
+`nix run` でサーバを起動します。
 
 ```sh
-install -d -m 700 "$HOME/.config/browser-chan"
-openssl rand -hex 32 > "$HOME/.config/browser-chan/mcp-token"
-chmod 600 "$HOME/.config/browser-chan/mcp-token"
-
-BROWSER_CHAN_HOST=0.0.0.0 \
-BROWSER_CHAN_MCP_TOKEN_FILE="$HOME/.config/browser-chan/mcp-token" \
 nix run
 ```
 
-DSH と MCP サーバが同一ホストなら `BROWSER_CHAN_HOST=127.0.0.1` と `http://127.0.0.1:3000/mcp` を使います。別ホストの場合は、サーバ側を `0.0.0.0` または Tailscale の IP で待ち受け、DSH 側からはその IP か hostname を指定します。IP リテラルの Host は自動で許可されます。FQDN やリバースプロキシ経由の hostname は `BROWSER_CHAN_MCP_ALLOWED_HOSTS` に追加してください。
+常駐させる場合は Home Manager module を使います。設定は [Home Manager module](#home-manager-module) を参照してください。
+
+MCP サーバの待ち受けアドレスは `BROWSER_CHAN_HOST` で決まり、既定は `127.0.0.1` です。DSH の URL は、待ち受けているアドレスかホスト名に合わせてください。既定なら `http://127.0.0.1:3000/mcp`、`localhost` なら `http://localhost:3000/mcp`、`::1` なら `http://[::1]:3000/mcp` です。
+
+別マシンから接続するために `BROWSER_CHAN_HOST=0.0.0.0` や `::` で待ち受ける場合は、接続元から見えるマシンの IP アドレスかホスト名を DSH に設定してください（例: `http://192.0.2.10:3000/mcp`）。[セキュリティ](#セキュリティ) の注意も読んでください。
 
 DSH のプロファイルにある `cordis.patch.yml` に次のエントリを追加します。`serverName: browser` によりツールは `mcp__browser__*` として見えます。
 
@@ -35,104 +34,135 @@ DSH のプロファイルにある `cordis.patch.yml` に次のエントリを�
   config:
     serverName: browser
     transport: streamable-http
-    url: http://<browser-server>:3000/mcp
-    headers:
-      Authorization: !!js '`Bearer ${process.env.BROWSER_CHAN_MCP_TOKEN}`'
+    url: http://127.0.0.1:3000/mcp
     failOnStartupError: true
 ```
 
-`<browser-server>` はサーバの IP か hostname に置き換えます。DSH と MCP サーバが同一ホストなら、`url: http://127.0.0.1:3000/mcp` を使います。`BROWSER_CHAN_MCP_TOKEN` は DSH を起動するシェルにもエクスポートしてください。サーバ側で `BROWSER_CHAN_MCP_TOKEN_FILE` を使う場合も、DSH 側には同じ値を `BROWSER_CHAN_MCP_TOKEN` として渡します。
-
 ### プロファイルの流れ
 
-ローカル Linux PC でログイン済みプロファイルを作り、サーバへ送ります。
+Home Manager のユーザーサービスでサーバを動かしている場合の例です。ローカルの Linux PC でログイン済みプロファイルを作り、サーバへ移します。
 
 ```sh
 # ローカル PC: Chromium を開いてログインする
-nix run .#profile-edit
+nix run .#edit
 
 # ローカル PC: アーカイブを作る
-nix run .#profile-export -- -o browser-chan-profile.tar.gz
+nix run .#export -- -o browser-chan-profile.tar.gz
 
-# サーバへ送る（サーバのブラウザは閉じられます）
-BROWSER_CHAN_MCP_TOKEN=... nix run .#profile-import -- \
-  --server http://server.example:3000 browser-chan-profile.tar.gz
+# ローカル PC: サーバへ送る
+scp -p browser-chan-profile.tar.gz server:/tmp/
+rm browser-chan-profile.tar.gz
 ```
-
-サーバのプロファイルをローカルへ戻す場合は、`profile-export` に `--server` を付けます。
 
 ```sh
-BROWSER_CHAN_MCP_TOKEN=... nix run .#profile-export -- \
-  --server http://server.example:3000 -o server-profile.tar.gz
+# サーバのユーザーシェル: サービスを止めて取り込む
+systemctl --user stop browser-chan
+browser-chan-import --profile-dir "$HOME/.local/share/browser-chan" /tmp/browser-chan-profile.tar.gz
+rm /tmp/browser-chan-profile.tar.gz
+systemctl --user start browser-chan
 ```
+
+`browser-chan-import` は Home Manager module が `home.packages` に入れます。`systemctl --user` と `browser-chan-import` は、サーバにログインしたユーザーのシェルで実行してください。`browser-chan-import` が PATH に無い場合は、サーバに browser-chan のチェックアウトがあるときに、そのディレクトリで `nix run .#import -- --profile-dir "$HOME/.local/share/browser-chan" /tmp/browser-chan-profile.tar.gz` を使います。
+
+サーバのプロファイルを書き出す場合も、同じユーザーでサービスを止めてから実行します。
+
+```sh
+# サーバのユーザーシェル
+systemctl --user stop browser-chan
+browser-chan-export --profile-dir "$HOME/.local/share/browser-chan" -o /tmp/server-profile.tar.gz
+systemctl --user start browser-chan
+```
+
+`browser-chan-export` も PATH に無い場合は、サーバのチェックアウトで `nix run .#export -- --profile-dir "$HOME/.local/share/browser-chan" -o /tmp/server-profile.tar.gz` を使います。
+
+```sh
+# ローカル PC
+scp -p server:/tmp/server-profile.tar.gz .
+ssh server rm /tmp/server-profile.tar.gz
+```
+
+import は自動では行いません。`tar.gz` を明示指定して手動で反映します。zip は扱いません。
 
 ## コマンド
 
 | コマンド | 用途 |
 | --- | --- |
 | `nix run` / `nix run .#default` | MCP サーバと HTTP サーバを起動する（既定） |
-| `nix run .#profile-edit` | ローカルで Chromium を開き、プロファイルを保存する |
-| `nix run .#profile-export` | プロファイルを `tar.gz` に書き出す |
-| `nix run .#profile-import` | プロファイルをサーバまたはローカルの保存先へ取り込む |
+| `nix run .#edit` | ローカルで Chromium を開き、プロファイルを保存する |
+| `nix run .#export` | プロファイルを `tar.gz` に書き出す |
+| `nix run .#import` | `tar.gz` をプロファイルディレクトリへ取り込む |
 
-Nix で導入した場合は `browser-chan`、`browser-chan-profile-edit`、`browser-chan-profile-export`、`browser-chan-profile-import` も使えます。
+Nix で導入した場合は `browser-chan`、`browser-chan-export`、`browser-chan-import` も使えます。GUI の `edit` は browser-chan のチェックアウトで `nix run .#edit` を実行してください。
 
 主なオプションです。
 
 | オプション | 対象 | 意味 |
 | --- | --- | --- |
-| `--server <url>` | export / import | HTTP 経由でサーバとやり取りする |
-| `--token <token>` | export / import | Bearer トークン。プロセス一覧に残るため、環境変数か `--token-file` を推奨 |
-| `--token-file <file>` | export / import | トークンを書いたファイル |
-| `--force` | profile-edit / export / import | ロック中のプロファイルを起動・置換し、既存の export 出力を上書きする |
-| `--profile-dir <dir>` | 全体 | プロファイルの保存先 |
+| `--force` | edit / export / import | ロック中でも `edit` を開き、`import` で置き換え、既存の export 出力を上書きする |
+| `--profile-dir <dir>` | edit / export / import | プロファイルの保存先 |
 | `-o, --output <file>` | export | 出力ファイル名 |
-
-`--token` はシェルの履歴や `ps` に残るため、常用は避けてください。
 
 ## 破壊的挙動
 
-- `profile-import` は既存のプロファイルを `<profileDir>.backup-<timestamp>` に rename して残し、その後に新しいプロファイルを配置します。`profileDir` が symlink の場合は拒否します。
-- `--force` を付けると、ロック中でも import し、既存の export 出力を上書きします。
-- `--server` を付けた export / import は、サーバのブラウザを一時的に閉じます。次の操作でプロファイルから再起動します。
-- ローカルで import する場合、展開したファイルの所有者は実行ユーザーになります。root で実行した場合だけ、元のディレクトリの uid / gid に合わせます。所有者を保ちたい場合は `--server` による remote import を推奨します。
-- トークン未設定で loopback 以外（`0.0.0.0`、LAN IP、ホスト名など）を指定すると、サーバは起動時にエラーで終了します。
-- 既定の bind は `127.0.0.1` です。`0.0.0.0` で待ち受けるときはトークンが必要です。
-- 展開後 2GiB を超えるプロファイルは拒否します。`BROWSER_CHAN_PROFILE_MAX_EXTRACTED_BYTES` で変更できます。
+- `import` は既存のプロファイルを `<profileDir>.backup-<timestamp>` に rename して残し、その後に新しいプロファイルを配置します。`profileDir` が symlink の場合は拒否します。
+- `--force` がない場合、ブラウザがプロファイルをロックしている間は `edit` / `export` / `import` が失敗します。
+- import したプロファイルの所有者は実行ユーザーになります。Home Manager のユーザーサービスでは root は不要です。root で実行した場合だけ、既存プロファイルの所有者、なければ親ディレクトリの所有者に合わせます。
 
 ## セキュリティ
 
-- トークンは公開インターネットへ直接出さず、Tailscale、SSH トンネル、TLS の内側で使ってください。Bearer トークンは HTTP のままでは平文で流れます。
-- トークンはブラウザ操作権限そのものです。漏れた場合はログイン済みプロファイルを操作されます。
-- トークンファイルは `600` にし、リポジトリや Nix store に置かないでください。
-- `/mcp` は Host と Origin を検査します。IP リテラルの Host は自動で許可され、FQDN は `BROWSER_CHAN_MCP_ALLOWED_HOSTS` にカンマ区切りで追加します。Origin 検査は常に行います。
-- loopback で待ち受けていても、同一マシンの任意のページを信頼しないでください。DNS rebinding や同一マシンの他ユーザーからのアクセスを防ぐため、トークンを設定してください。
-- export した `tar.gz` は Cookie を含みます。`600` で扱い、不要になったら削除してください。
+- 認証はありません。`/mcp` に到達できる相手はブラウザを操作できます。到達範囲は `BROWSER_CHAN_HOST` の待ち受けアドレスと、前段のプロキシやファイアウォールの設定で決まります。
+- 前段のプロキシやファイアウォールで絞っていない限り、`0.0.0.0` などで待ち受けると同一ネットワークの誰でもブラウザを操作できます。ブラウザ操作権限そのものなので、信頼できるネットワークに限ってください。
+- リバースプロキシや `tailscale serve` を前段に置く場合は、前段の ACL で絞ってください。
+- 同一マシンの他プロセスや他ユーザーからもアクセスできます。信頼できる利用者だけがログインするマシンで動かしてください。
+- export / import する `tar.gz` は Cookie を含みます。`600` で扱い、Nix store に置かず、不要になったら削除してください。
 
-## NixOS module
+## Home Manager module
 
-`mcpTokenFile` には、利用者が用意したトークンファイルのパスを指定します。次の例のパスはプレースホルダです。
+flake の input に追加し、`homeManagerModules.default` を import します。`/path/to/browser-chan` は実際のパスに置き換えます。
 
 ```nix
-services.browser-chan = {
-  enable = true;
-  host = "0.0.0.0";
-  port = 3000;
-  mcpTokenFile = "/run/secrets/browser-chan-token";
-  # リバースプロキシや MagicDNS 名がホスト名と一致しない場合（任意）
-  mcpAllowedHosts = [ "browser.example" ];
+# flake.nix
+inputs = {
+  browser-chan.url = "path:/path/to/browser-chan";
 };
 ```
 
-`host` が `127.0.0.1`、`::1`、`localhost` の場合は `mcpTokenFile` を省略できます。
+```nix
+# home.nix
+{ inputs, ... }:
+{
+  imports = [ inputs.browser-chan.homeManagerModules.default ];
+
+  services.browser-chan = {
+    enable = true;
+    host = "127.0.0.1";
+    port = 3000;
+  };
+}
+```
+
+`home-manager` は利用者の flake に追加済みとします。`inputs` は `homeManagerConfiguration` の `extraSpecialArgs` などで Home Manager module へ渡します。`host` は待ち受けアドレスで、既定は `127.0.0.1` です。`0.0.0.0` などを指定すると、他のホストからもアクセスできます。
+
+`profileDir` の既定は `~/.local/share/browser-chan` です。`profileDir` を変更した場合は、`browser-chan-import` / `browser-chan-export` にも `--profile-dir <dir>` を渡してください。`home.packages` に `browser-chan` と CLI 群が入ります。GUI の `edit` は、browser-chan のチェックアウトで `nix run .#edit`、input 経由なら `nix run /path/to/browser-chan#edit` を使います。
+
+サービスは systemd user service として動きます。
+
+```sh
+systemctl --user start browser-chan
+systemctl --user status browser-chan
+systemctl --user restart browser-chan
+```
+
+ログインしていない間も動かす場合は linger を有効にします。NixOS では `users.users.<name>.linger = true`（`<name>` はユーザー名）、それ以外では `loginctl enable-linger "$USER"` を設定します。
 
 ## Docker
 
-`BROWSER_CHAN_MCP_TOKEN` が必須です。`BROWSER_CHAN_MCP_TOKEN=... docker compose up` で起動します。コンテナ内の interface は NAT されるため、IP リテラルの Host は自動許可されますが、FQDN やリバースプロキシ経由の hostname は `BROWSER_CHAN_MCP_ALLOWED_HOSTS` に追加してください。
+docker compose は `network_mode: host` で起動し、コンテナ内も既定で `127.0.0.1:3000` で待ち受けます。`docker compose up` で起動し、DSH からは `http://127.0.0.1:3000/mcp` に接続します。
+
+プロファイルは `./browser-profile` に bind mount されます。コンテナは root で動くため、ホスト側で export / import する場合は `docker compose down` の後に `sudo chown -R "$(id -u):$(id -g)" ./browser-profile` で所有者を戻し、`nix run .#export -- --profile-dir ./browser-profile` を実行してください。
 
 ## HTTP API
 
-- `GET /` はニコニコ生放送のページを開き、`{ nicoWsurl, vposBaseTime, liveId }` を `text/plain` の JSON で返します。既存互換のため認証なしです。
-- `GET /hand` は GUI の Chromium を開きます。トークン設定時は Bearer 認証が必要です。
+- `GET /` はニコニコ生放送のページを開き、`{ nicoWsurl, vposBaseTime, liveId }` を `text/plain` の JSON で返します。
 - `GET /healthz` は `{ status: "ok", browserOpen: boolean }` を返します。
-- `POST /profile/import` と `GET /profile/export` は、それぞれ `application/gzip` のアーカイブを受け取り・返します。トークン設定時は Bearer 認証が必要です。
+- プロファイルの export / import は CLI の `export` / `import` を使います。

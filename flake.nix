@@ -14,7 +14,6 @@
       ...
     }:
     let
-      nixosModule = import ./nix/nixos_module.nix self;
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -45,14 +44,14 @@
               ;
           };
 
-          profileEdit = pkgs.buildFHSEnv {
-            name = "browser-chan-profile-edit";
+          edit = pkgs.buildFHSEnv {
+            name = "browser-chan-edit";
             targetPkgs = ps: [
               ps.playwright-driver.browsers
               ps.fontconfig
               ps.noto-fonts-cjk-sans
             ];
-            runScript = "${pkg}/bin/browser-chan-profile-edit";
+            runScript = "${pkg}/bin/browser-chan-edit";
           };
         in
         {
@@ -60,24 +59,24 @@
           devShells.default = (import ./nix/dev_shell.nix) { inherit pkgs chromium-rev; };
           packages = {
             default = pkg;
-            profile-edit = profileEdit;
+            inherit edit;
           };
           apps = {
             default = {
               type = "app";
               program = "${pkg}/bin/browser-chan";
             };
-            profile-edit = {
+            edit = {
               type = "app";
-              program = "${profileEdit}/bin/browser-chan-profile-edit";
+              program = "${edit}/bin/browser-chan-edit";
             };
-            profile-export = {
+            export = {
               type = "app";
-              program = "${pkg}/bin/browser-chan-profile-export";
+              program = "${pkg}/bin/browser-chan-export";
             };
-            profile-import = {
+            import = {
               type = "app";
-              program = "${pkg}/bin/browser-chan-profile-import";
+              program = "${pkg}/bin/browser-chan-import";
             };
           };
         }
@@ -85,7 +84,7 @@
     in
     perSystem
     // {
-      nixosModules.default = nixosModule;
+      homeManagerModules.default = import ./nix/home_manager_module.nix self;
     };
 
 }

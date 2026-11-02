@@ -8,7 +8,9 @@
     "types": ["node"],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
+    "rootDir": ".",
     "outDir": "./dist"
   },
+  "include": ["src/**/*.ts", "cli/**/*.ts"],
   "exclude": ["node_modules", "dist", "result", "result-*", ".tmp-*"]
 }

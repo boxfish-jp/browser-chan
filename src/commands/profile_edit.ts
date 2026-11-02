@@ -1,6 +1,6 @@
 import { chromium } from "playwright-core";
-import { defaultProfileDir } from "../config.js";
-import { isProfileLocked } from "../profile/archive.js";
+import { defaultProfileDir } from "../paths.js";
+import { isProfileLocked } from "../profile/lock.js";
 
 export type ProfileEditOptions = {
   url?: string;

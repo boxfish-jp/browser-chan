@@ -52,15 +52,24 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
     export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="ubuntu-24.04"
     export NODE_PATH="${placeholder "out"}/lib/${pname}/node_modules"
-    exec "$NODE_BIN" "${placeholder "out"}/lib/${pname}/dist/index.js" "\$@"
+    exec "$NODE_BIN" "${placeholder "out"}/lib/${pname}/dist/src/index.js" "\$@"
     EOF
     chmod +x $out/bin/$pname
 
-    for subcommand in profile-edit profile-export profile-import; do
+    cat > $out/bin/browser-chan-edit <<EOF
+    #!${pkgs.bash}/bin/bash
+    set -euo pipefail
+    exec "${placeholder "out"}/bin/$pname" edit "\$@"
+    EOF
+    chmod +x $out/bin/browser-chan-edit
+
+    for subcommand in export import; do
       cat > $out/bin/browser-chan-$subcommand <<EOF
     #!${pkgs.bash}/bin/bash
     set -euo pipefail
-    exec "${placeholder "out"}/bin/$pname" $subcommand "\$@"
+    export PATH="${pkgs.gnutar}/bin:${pkgs.gzip}/bin:${pkgs.coreutils}/bin:\$PATH"
+    export NODE_PATH="${placeholder "out"}/lib/${pname}/node_modules"
+    exec "$NODE_BIN" "${placeholder "out"}/lib/${pname}/dist/cli/index.js" $subcommand "\$@"
     EOF
       chmod +x $out/bin/browser-chan-$subcommand
     done

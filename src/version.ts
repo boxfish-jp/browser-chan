@@ -1,6 +1,20 @@
-import { createRequire } from "node:module";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const packageJson = require("../package.json") as { version: string };
+const packageJsonCandidates = [
+  fileURLToPath(new URL("../package.json", import.meta.url)),
+  fileURLToPath(new URL("../../package.json", import.meta.url)),
+];
+const packageJsonPath = packageJsonCandidates.find((candidate) =>
+  existsSync(candidate),
+);
+if (!packageJsonPath) {
+  throw new Error(
+    `package.json not found: ${packageJsonCandidates.join(", ")}`,
+  );
+}
+const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+  version: string;
+};
 
 export const VERSION = packageJson.version;

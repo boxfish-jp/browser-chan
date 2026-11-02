@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "start": "node dist/src/index.js",
+    "test": "tsx --test \"src/**/*.test.ts\" \"cli/**/*.test.ts\"",
     "lint": "biome check .",
     "format": "biome format --write ."
   },

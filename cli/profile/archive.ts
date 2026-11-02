@@ -6,20 +6,20 @@ import {
   mkdir,
   mkdtemp,
   readdir,
-  readlink,
   rename,
   rm,
   stat,
 } from "node:fs/promises";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { isProfileLocked, ProfileLockedError } from "../../src/profile/lock.js";
+
+export { ProfileLockedError };
 
 const execFileAsync = promisify(execFile);
 const LOCK_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
 const MAX_ARCHIVE_ENTRIES = 100_000;
-export const DEFAULT_PROFILE_MAX_BYTES = 512 * 1024 * 1024;
-export const DEFAULT_PROFILE_MAX_EXTRACTED_BYTES = 2 * 1024 * 1024 * 1024;
 const TAR_MAX_BUFFER = 64 * 1024 * 1024;
 const CACHE_EXCLUDES = [
   "Cache",
@@ -34,24 +34,10 @@ const CACHE_EXCLUDES = [
   "Service Worker/ScriptCache",
 ];
 
-export class ProfileLockedError extends Error {
-  constructor(profileDir: string) {
-    super(`Profile is locked by a running browser: ${profileDir}`);
-    this.name = "ProfileLockedError";
-  }
-}
-
 export class ProfileArchiveError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ProfileArchiveError";
-  }
-}
-
-export class ProfileTooLargeError extends Error {
-  constructor(maxBytes: number) {
-    super(`Profile archive exceeds the ${maxBytes} byte limit`);
-    this.name = "ProfileTooLargeError";
   }
 }
 
@@ -89,23 +75,6 @@ export const isChromiumProfileEntry = (entry: string): boolean => {
   );
 };
 
-export const parseSingletonLockTarget = (
-  target: string | null,
-): { hostname: string; pid: number } | null => {
-  if (!target) {
-    return null;
-  }
-  const match = /^(.+)-(\d+)$/.exec(target);
-  if (!match) {
-    return null;
-  }
-  const pid = Number(match[2]);
-  if (!Number.isSafeInteger(pid) || pid < 1) {
-    return null;
-  }
-  return { hostname: match[1], pid };
-};
-
 const exists = async (path: string): Promise<boolean> => {
   try {
     await lstat(path);
@@ -113,30 +82,6 @@ const exists = async (path: string): Promise<boolean> => {
   } catch {
     return false;
   }
-};
-
-const isProcessAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
-
-export const isProfileLocked = async (profileDir: string): Promise<boolean> => {
-  const lock = await lstat(join(profileDir, "SingletonLock")).catch(() => null);
-  if (!lock) {
-    return false;
-  }
-  const target = await readlink(join(profileDir, "SingletonLock")).catch(
-    () => null,
-  );
-  const parsed = parseSingletonLockTarget(target);
-  if (parsed && parsed.hostname === hostname() && !isProcessAlive(parsed.pid)) {
-    return false;
-  }
-  return true;
 };
 
 const assertUnlocked = async (
@@ -190,26 +135,13 @@ const archiveTypes = async (archive: string): Promise<string[]> => {
   return stdout.split("\n").filter((line) => line.length > 0);
 };
 
-const assertArchiveSize = async (
+export const validateProfileArchive = async (
   archive: string,
-  maxBytes: number,
-): Promise<number> => {
+): Promise<void> => {
   const file = await stat(archive).catch(() => null);
   if (!file?.isFile()) {
     throw new ProfileArchiveError(`Archive does not exist: ${archive}`);
   }
-  if (file.size > maxBytes) {
-    throw new ProfileTooLargeError(maxBytes);
-  }
-  return file.size;
-};
-
-export const validateProfileArchive = async (
-  archive: string,
-  maxBytes = DEFAULT_PROFILE_MAX_BYTES,
-  maxExtractedBytes = DEFAULT_PROFILE_MAX_EXTRACTED_BYTES,
-): Promise<number> => {
-  const size = await assertArchiveSize(archive, maxBytes);
   let entries: string[];
   try {
     entries = await archiveEntries(archive);
@@ -250,16 +182,6 @@ export const validateProfileArchive = async (
       );
     }
   }
-  const extractedBytes = types.reduce((total, line) => {
-    const size = Number(line.trim().split(/\s+/)[2]);
-    return total + (Number.isSafeInteger(size) && size > 0 ? size : 0);
-  }, 0);
-  if (extractedBytes > maxExtractedBytes) {
-    throw new ProfileArchiveError(
-      `Archive expands to more than ${maxExtractedBytes} bytes`,
-    );
-  }
-  return size;
 };
 
 export type ExportProfileOptions = {
@@ -302,8 +224,7 @@ export const exportProfile = async (
     await rm(output, { force: true }).catch(() => undefined);
     if (
       error instanceof ProfileArchiveError ||
-      error instanceof ProfileLockedError ||
-      error instanceof ProfileTooLargeError
+      error instanceof ProfileLockedError
     ) {
       throw error;
     }
@@ -317,8 +238,6 @@ export type ImportProfileOptions = {
   profileDir: string;
   archive: string;
   force?: boolean;
-  maxBytes?: number;
-  maxExtractedBytes?: number;
 };
 
 export type ImportProfileResult = {
@@ -372,11 +291,7 @@ export const importProfile = async (
     );
   }
   await assertUnlocked(profileDir, force);
-  await validateProfileArchive(
-    archive,
-    options.maxBytes,
-    options.maxExtractedBytes,
-  );
+  await validateProfileArchive(archive);
   const parent = dirname(profileDir);
   await mkdir(parent, { recursive: true });
   const staging = await mkdtemp(join(parent, ".browser-chan-staging-"));
@@ -405,8 +320,11 @@ export const importProfile = async (
     }
     await rename(staging, profileDir);
     installed = true;
-    if (original && process.getuid?.() === 0) {
-      await chownRecursive(profileDir, original.uid, original.gid);
+    if (process.getuid?.() === 0) {
+      const owner = original ?? (await stat(parent).catch(() => null));
+      if (owner) {
+        await chownRecursive(profileDir, owner.uid, owner.gid);
+      }
     }
     return {
       profileDir,
@@ -423,8 +341,7 @@ export const importProfile = async (
     }
     if (
       error instanceof ProfileArchiveError ||
-      error instanceof ProfileLockedError ||
-      error instanceof ProfileTooLargeError
+      error instanceof ProfileLockedError
     ) {
       throw error;
     }

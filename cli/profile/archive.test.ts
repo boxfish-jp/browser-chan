@@ -18,11 +18,9 @@ import {
   exportProfile,
   importProfile,
   isChromiumProfileEntry,
-  isProfileLocked,
   isSafeArchiveEntry,
   ProfileArchiveError,
   ProfileLockedError,
-  parseSingletonLockTarget,
   validateProfileArchive,
 } from "./archive.js";
 
@@ -96,35 +94,6 @@ describe("isChromiumProfileEntry", () => {
   });
 });
 
-describe("parseSingletonLockTarget", () => {
-  it("hostname-pid形式を解析する", () => {
-    assert.deepEqual(parseSingletonLockTarget("my-host-1234"), {
-      hostname: "my-host",
-      pid: 1234,
-    });
-  });
-
-  it("PIDを含まないtargetを拒否する", () => {
-    assert.equal(parseSingletonLockTarget("my-host"), null);
-    assert.equal(parseSingletonLockTarget("my-host-not-a-pid"), null);
-    assert.equal(parseSingletonLockTarget(null), null);
-  });
-});
-
-describe("isProfileLocked", () => {
-  it("SingletonLockがなければCookieだけではロックと判定しない", async () => {
-    const root = await mkdtemp(join(tmpdir(), "browser-chan-archive-"));
-    try {
-      const profileDir = join(root, "profile");
-      await mkdir(profileDir);
-      await writeFile(join(profileDir, "SingletonCookie"), "cookie");
-      assert.equal(await isProfileLocked(profileDir), false);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-});
-
 describe("validateProfileArchive", () => {
   it("symlinkを含むアーカイブを拒否する", async () => {
     const root = await mkdtemp(join(tmpdir(), "browser-chan-archive-"));
@@ -168,21 +137,6 @@ describe("validateProfileArchive", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
-
-  it("展開後サイズが上限を超えるアーカイブを拒否する", async () => {
-    const root = await mkdtemp(join(tmpdir(), "browser-chan-archive-"));
-    try {
-      const profileDir = await makeProfile(root);
-      const archive = join(root, "profile.tar.gz");
-      await exportProfile({ profileDir, output: archive });
-      await assert.rejects(
-        validateProfileArchive(archive, undefined, 1),
-        ProfileArchiveError,
-      );
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
 });
 
 describe("exportProfile", () => {
@@ -206,7 +160,7 @@ describe("exportProfile", () => {
         entries.some((entry) => entry.includes("Singleton")),
         false,
       );
-      assert.equal((await validateProfileArchive(archive)) > 0, true);
+      await assert.doesNotReject(validateProfileArchive(archive));
     } finally {
       await rm(root, { recursive: true, force: true });
     }
